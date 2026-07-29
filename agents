@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""agents — an inbox for your Claude Code background agents.
+
+Lists the background jobs in ~/.claude/jobs and remembers which finished
+ones you've already read, so the ● marks are always the ones you still
+need to look at.
+
+  agents             list all jobs, newest first (● = finished, unread)
+  agents unread      list only finished jobs you haven't read yet
+  agents show ID     print a job's intent, state and full result text
+  agents read ID..   mark job(s) as read ('agents read all' = every finished job)
+  agents unread ID   mark a job unread again
+
+IDs may be abbreviated to any unique prefix. A job that produces new
+output after you marked it read flips back to unread automatically.
+
+Read state is a `.read` marker file inside each job directory — deleting
+a job deletes its marker, and nothing else is written anywhere.
+
+Respects $CLAUDE_CONFIG_DIR (default ~/.claude) and $NO_COLOR.
+"""
+import json, sys, glob, os
+from datetime import datetime, timezone
+
+CONFIG = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+JOBS = os.path.join(CONFIG, "jobs")
+RUNNING = {"working", "active", "starting"}
+COLOR = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+
+
+def c(code, s):
+    return f"\033[{code}m{s}\033[0m" if COLOR else s
+
+
+def load_jobs():
+    jobs = []
+    for f in glob.glob(os.path.join(JOBS, "*", "state.json")):
+        try:
+            s = json.load(open(f))
+        except Exception:
+            continue
+        d = os.path.dirname(f)
+        out = s.get("output")
+        if isinstance(out, dict):
+            out = out.get("result") or json.dumps(out)
+        jobs.append({
+            "id": os.path.basename(d),
+            "dir": d,
+            "state": s.get("state") or "?",
+            "intent": " ".join((s.get("intent") or s.get("detail") or "").split()),
+            "output": (out or "").strip(),
+            "updated": s.get("updatedAt") or "",
+        })
+    jobs.sort(key=lambda j: j["updated"], reverse=True)
+    return jobs
+
+
+def is_finished(j):
+    return j["state"] not in RUNNING
+
+
+def read_marker(j):
+    return os.path.join(j["dir"], ".read")
+
+
+def updated_ts(j):
+    try:
+        return datetime.fromisoformat(j["updated"].replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0
+
+
+def is_unread(j):
+    """Finished, and not marked read since its last update."""
+    if not is_finished(j):
+        return False
+    m = read_marker(j)
+    return not os.path.exists(m) or os.path.getmtime(m) < updated_ts(j)
+
+
+def resolve(prefix, jobs):
+    hits = [j for j in jobs if j["id"].startswith(prefix)]
+    if len(hits) == 1:
+        return hits[0]
+    print(f"{'ambiguous' if hits else 'no such'} job: {prefix}", file=sys.stderr)
+    sys.exit(1)
+
+
+def when(j):
+    ts = updated_ts(j)
+    if not ts:
+        return "?"
+    age = datetime.now(timezone.utc).timestamp() - ts
+    if age < 3600:
+        return f"{max(1, int(age // 60))}m ago"
+    if age < 86400:
+        return f"{int(age // 3600)}h ago"
+    return datetime.fromtimestamp(ts).strftime("%b %d")
+
+
+def show_list(jobs):
+    if not jobs:
+        print("no jobs")
+        return
+    for j in jobs:
+        if not is_finished(j):
+            mark, label = "·", "running"
+        elif is_unread(j):
+            mark, label = c("1;33", "●"), j["state"]
+        else:
+            mark, label = c("2", "✓"), j["state"]
+        line = j["intent"] or "(no intent)"
+        print(f"{mark} {j['id']}  {when(j):>7}  {label:<8} {line[:70]}")
+        if is_unread(j) and j["output"]:
+            print(f"    {c('2', j['output'][:100])}")
+    running = sum(1 for j in jobs if not is_finished(j))
+    unread = sum(1 for j in jobs if is_unread(j))
+    print(f"\n{running} running · {unread} unread"
+          + (" — 'agents show ID' to read, 'agents read ID' to check off" if unread else ""))
+
+
+def main():
+    args = sys.argv[1:]
+    if args and args[0] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return
+    jobs = load_jobs()
+
+    if not args:
+        show_list(jobs)
+    elif args[0] == "unread" and len(args) == 1:
+        show_list([j for j in jobs if is_unread(j)])
+    elif args[0] == "unread":
+        for p in args[1:]:
+            j = resolve(p, jobs)
+            if os.path.exists(read_marker(j)):
+                os.remove(read_marker(j))
+            print(f"● {j['id']} marked unread")
+    elif args[0] == "read":
+        targets = ([j for j in jobs if is_finished(j)] if args[1:] == ["all"]
+                   else [resolve(p, jobs) for p in args[1:]])
+        if not targets:
+            print("usage: agents read ID.. | all", file=sys.stderr)
+            sys.exit(1)
+        for j in targets:
+            open(read_marker(j), "w").close()
+            print(f"✓ {j['id']} read")
+    elif args[0] == "show":
+        if len(args) < 2:
+            print("usage: agents show ID", file=sys.stderr)
+            sys.exit(1)
+        j = resolve(args[1], jobs)
+        print(f"id:      {j['id']}")
+        print(f"state:   {j['state']}   updated: {when(j)}")
+        print(f"intent:  {j['intent']}")
+        print(f"\n{j['output'] or '(no result text recorded)'}")
+    else:
+        print(__doc__.strip(), file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
