@@ -15,7 +15,8 @@ IDs may be abbreviated to any unique prefix. A job that produces new
 output after you marked it read flips back to unread automatically.
 
 Read state is a `.read` marker file inside each job directory — deleting
-a job deletes its marker, and nothing else is written anywhere.
+a job deletes its marker. Marking a job read also prefixes '✓ ' to its
+summary line, so Claude Code's own built-in job list shows the mark too.
 
 Respects $CLAUDE_CONFIG_DIR (default ~/.claude) and $NO_COLOR.
 """
@@ -43,12 +44,15 @@ def load_jobs():
         out = s.get("output")
         if isinstance(out, dict):
             out = out.get("result") or json.dumps(out)
+        out = (out or "").strip()
+        if out.startswith("✓ "):
+            out = out[2:]
         jobs.append({
             "id": os.path.basename(d),
             "dir": d,
             "state": s.get("state") or "?",
             "intent": " ".join((s.get("intent") or s.get("detail") or "").split()),
-            "output": (out or "").strip(),
+            "output": out,
             "updated": s.get("updatedAt") or "",
         })
     jobs.sort(key=lambda j: j["updated"], reverse=True)
@@ -61,6 +65,39 @@ def is_finished(j):
 
 def read_marker(j):
     return os.path.join(j["dir"], ".read")
+
+
+def set_badge(j, on):
+    """Prefix '✓ ' to the job's summary text so the built-in Claude Code
+    job list shows the read mark too. Removed on unread; naturally
+    overwritten if the job produces new output."""
+    f = os.path.join(j["dir"], "state.json")
+    try:
+        s = json.load(open(f))
+    except Exception:
+        return
+
+    def mark(txt):
+        has = txt.startswith("✓ ")
+        if on and not has:
+            return "✓ " + txt
+        if not on and has:
+            return txt[2:]
+        return txt
+
+    out = s.get("output")
+    if isinstance(out, dict) and out.get("result"):
+        out["result"] = mark(out["result"])
+    elif isinstance(out, str) and out:
+        s["output"] = mark(out)
+    elif s.get("detail"):
+        s["detail"] = mark(s["detail"])
+    else:
+        return
+    tmp = f + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(s, fh, indent=2)
+    os.replace(tmp, f)
 
 
 def updated_ts(j):
@@ -135,6 +172,7 @@ def main():
             j = resolve(p, jobs)
             if os.path.exists(read_marker(j)):
                 os.remove(read_marker(j))
+            set_badge(j, False)
             print(f"● {j['id']} marked unread")
     elif args[0] == "read":
         targets = ([j for j in jobs if is_finished(j)] if args[1:] == ["all"]
@@ -144,6 +182,7 @@ def main():
             sys.exit(1)
         for j in targets:
             open(read_marker(j), "w").close()
+            set_badge(j, True)
             print(f"✓ {j['id']} read")
     elif args[0] == "show":
         if len(args) < 2:
