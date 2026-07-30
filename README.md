@@ -43,13 +43,10 @@ IDs can be abbreviated to any unique prefix.
 ## How it works
 
 Claude Code keeps each background job's state in `~/.claude/jobs/<id>/state.json`.
-The script lists those, and marking a job read touches a `.read` file inside its
-job directory and prefixes `✓ ` to the job's summary line — so the read mark also
-shows up in Claude Code's own built-in job list, right where you already look.
-`agents unread ID` removes both. If the job produces new output after you marked
-it read, it flips back to unread automatically (new output overwrites the badge,
-and the marker is older than the job's `updatedAt`). Deleting a job deletes its
-marker; nothing is written outside the job directories.
+The script lists those, and marking a job read just touches a `.read` file inside
+its job directory. If the job produces new output after you marked it read, it
+flips back to unread automatically (marker older than the job's `updatedAt`).
+Deleting a job deletes its marker; nothing is written anywhere else.
 
 Respects `$CLAUDE_CONFIG_DIR` (default `~/.claude`) and `$NO_COLOR`.
 
