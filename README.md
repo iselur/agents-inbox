@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/iselur/agents-inbox/main/agents \
 ## Use
 
 ```
-agents             list jobs — latest finished on top, running ones below
+agents             list all jobs, newest first
 agents unread      only the finished ones you haven't read yet
 agents show ID     read one job's intent and full result
 agents read ID..   check job(s) off ('agents read all' clears the backlog)
@@ -46,8 +46,6 @@ Claude Code keeps each background job's state in `~/.claude/jobs/<id>/state.json
 The script lists those, and marking a job read touches a `.read` file inside its
 job directory and prefixes `✓ ` to the job's summary line — so the read mark also
 shows up in Claude Code's own built-in job list, right where you already look.
-(Claude Code's daemon only picks up the edit if `updatedAt` advances, so the
-script bumps it — by just 1 ms, keeping the job's real finish-time sort order.)
 `agents unread ID` removes both. If the job produces new output after you marked
 it read, it flips back to unread automatically (new output overwrites the badge,
 and the marker is older than the job's `updatedAt`). Deleting a job deletes its

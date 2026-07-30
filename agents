@@ -5,7 +5,7 @@ Lists the background jobs in ~/.claude/jobs and remembers which finished
 ones you've already read, so the ● marks are always the ones you still
 need to look at.
 
-  agents             list jobs, latest finished on top (● = finished, unread)
+  agents             list all jobs, newest first (● = finished, unread)
   agents unread      list only finished jobs you haven't read yet
   agents show ID     print a job's intent, state and full result text
   agents read ID..   mark job(s) as read ('agents read all' = every finished job)
@@ -21,7 +21,7 @@ summary line, so Claude Code's own built-in job list shows the mark too.
 Respects $CLAUDE_CONFIG_DIR (default ~/.claude) and $NO_COLOR.
 """
 import json, sys, glob, os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 CONFIG = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
 JOBS = os.path.join(CONFIG, "jobs")
@@ -55,9 +55,7 @@ def load_jobs():
             "output": out,
             "updated": s.get("updatedAt") or "",
         })
-    # Finished jobs first, latest finished on top; running ones below.
     jobs.sort(key=lambda j: j["updated"], reverse=True)
-    jobs.sort(key=lambda j: j["state"] in RUNNING)
     return jobs
 
 
@@ -87,45 +85,19 @@ def set_badge(j, on):
             return txt[2:]
         return txt
 
-    changed = False
     out = s.get("output")
     if isinstance(out, dict) and out.get("result"):
-        out["result"], changed = mark(out["result"]), True
+        out["result"] = mark(out["result"])
     elif isinstance(out, str) and out:
-        s["output"], changed = mark(out), True
-    if s.get("detail"):  # the built-in job list displays this field
-        s["detail"], changed = mark(s["detail"]), True
-    if not changed:
+        s["output"] = mark(out)
+    elif s.get("detail"):
+        s["detail"] = mark(s["detail"])
+    else:
         return
-    # The daemon reconciles by updatedAt freshness — a stale timestamp
-    # means its cached (unmarked) copy wins and the edit never displays.
-    # Bump by only 1ms so the job keeps its real finish-time sort order
-    # instead of jumping to the top of the list when marked read.
-    try:
-        t = datetime.fromisoformat((s.get("updatedAt") or "").replace("Z", "+00:00")) \
-            + timedelta(milliseconds=1)
-    except ValueError:
-        t = datetime.now(timezone.utc)
-    stamp = t.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-    s["updatedAt"] = stamp
     tmp = f + ".tmp"
     with open(tmp, "w") as fh:
         json.dump(s, fh, indent=2)
     os.replace(tmp, f)
-
-    # The job list renders the last timeline event, so append one there too.
-    tl = os.path.join(j["dir"], "timeline.jsonl")
-    try:
-        with open(tl) as fh:
-            last = json.loads([l for l in fh if l.strip()][-1])
-    except Exception:
-        return
-    if mark(last.get("detail") or "") == (last.get("detail") or ""):
-        return  # already in the desired state
-    last["detail"] = mark(last.get("detail") or "")
-    last["at"] = stamp
-    with open(tl, "a") as fh:
-        fh.write(json.dumps(last, ensure_ascii=False) + "\n")
 
 
 def updated_ts(j):
@@ -209,8 +181,8 @@ def main():
             print("usage: agents read ID.. | all", file=sys.stderr)
             sys.exit(1)
         for j in targets:
-            set_badge(j, True)  # before the marker: badge bumps updatedAt
             open(read_marker(j), "w").close()
+            set_badge(j, True)
             print(f"✓ {j['id']} read")
     elif args[0] == "show":
         if len(args) < 2:
