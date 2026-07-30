@@ -51,10 +51,9 @@ def load_jobs():
             "id": os.path.basename(d),
             "dir": d,
             "state": s.get("state") or "?",
-            "intent": " ".join((s.get("intent") or s.get("detail") or "").split()).removeprefix("✓ "),
+            "intent": " ".join((s.get("intent") or s.get("detail") or "").split()),
             "output": out,
             "updated": s.get("updatedAt") or "",
-            "badged": (s.get("detail") or "").startswith("✓ "),
         })
     # Finished jobs first, latest finished on top; running ones below.
     jobs.sort(key=lambda j: j["updated"], reverse=True)
@@ -94,10 +93,8 @@ def set_badge(j, on):
         out["result"], changed = mark(out["result"]), True
     elif isinstance(out, str) and out:
         s["output"], changed = mark(out), True
-    if s.get("detail"):  # the built-in job list's summary line
+    if s.get("detail"):  # the built-in job list displays this field
         s["detail"], changed = mark(s["detail"]), True
-    if s.get("name"):  # the built-in job list's row title
-        s["name"], changed = mark(s["name"]), True
     if not changed:
         return
     # The daemon reconciles by updatedAt freshness — a stale timestamp
@@ -141,12 +138,6 @@ def updated_ts(j):
 def is_unread(j):
     """Finished, and not marked read since its last update."""
     if not is_finished(j):
-        return False
-    if j["badged"]:
-        # The ✓ stamped into the job's own summary is the primary signal —
-        # it survives the daemon rewriting state.json (which bumps updatedAt
-        # and would otherwise flip a read job back to unread). New output
-        # overwrites the summary, clearing the badge: unread again.
         return False
     m = read_marker(j)
     return not os.path.exists(m) or os.path.getmtime(m) < updated_ts(j)
